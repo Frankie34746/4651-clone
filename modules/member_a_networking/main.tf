@@ -10,14 +10,18 @@
 
 # ─── Variables ───────────────────────────────────────────────────────────────
 
-variable "project_name"        { type = string }
-variable "vpc_cidr"            { type = string }
-variable "vault_subnet_cidr"   { type = string }
+variable "project_name"         { type = string }
+variable "vpc_cidr"             { type = string }
+variable "vault_subnet_cidr"    { type = string }
 variable "refinery_subnet_cidr" { type = string }
-variable "lab_subnet_cidr"     { type = string }
-variable "availability_zone"   { type = string }
+variable "lab_subnet_cidr"      { type = string }
+variable "availability_zone"    { type = string }
 
 data "aws_region" "current" {}
+
+data "aws_prefix_list" "s3" {
+  name = "com.amazonaws.${data.aws_region.current.name}.s3"
+}
 
 # ─── VPC ─────────────────────────────────────────────────────────────────────
 
@@ -253,8 +257,28 @@ resource "aws_network_acl" "refinery_nacl" {
     to_port    = 0
   }
 
+  # Default allow remaining (for S3 and ephemeral ports)
+  ingress {
+    protocol   = "-1"
+    rule_no    = 200
+    action     = "allow"
+    cidr_block = "0.0.0.0/0"
+    from_port  = 0
+    to_port    = 0
+  }
+
+  egress {
+    protocol   = "-1"
+    rule_no    = 200
+    action     = "allow"
+    cidr_block = "0.0.0.0/0"
+    from_port  = 0
+    to_port    = 0
+  }
+
   tags = { Name = "${var.project_name}-refinery-nacl" }
 }
+
 resource "aws_security_group" "ssm_endpoints_sg" {
   name_prefix = "${var.project_name}-ssm-endpoint-"
   description = "Allow VPC traffic to SSM interface endpoints"
@@ -280,29 +304,29 @@ resource "aws_security_group" "ssm_endpoints_sg" {
 }
 
 resource "aws_vpc_endpoint" "ssm" {
-  vpc_id            = aws_vpc.main.id
-  service_name      = "com.amazonaws.${data.aws_region.current.name}.ssm"
-  vpc_endpoint_type = "Interface"
-  subnet_ids        = [aws_subnet.lab.id]
-  security_group_ids = [aws_security_group.ssm_endpoints_sg.id]
+  vpc_id              = aws_vpc.main.id
+  service_name        = "com.amazonaws.${data.aws_region.current.name}.ssm"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = [aws_subnet.lab.id]
+  security_group_ids  = [aws_security_group.ssm_endpoints_sg.id]
   private_dns_enabled = true
 }
 
 resource "aws_vpc_endpoint" "ssmmessages" {
-  vpc_id            = aws_vpc.main.id
-  service_name      = "com.amazonaws.${data.aws_region.current.name}.ssmmessages"
-  vpc_endpoint_type = "Interface"
-  subnet_ids        = [aws_subnet.lab.id]
-  security_group_ids = [aws_security_group.ssm_endpoints_sg.id]
+  vpc_id              = aws_vpc.main.id
+  service_name        = "com.amazonaws.${data.aws_region.current.name}.ssmmessages"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = [aws_subnet.lab.id]
+  security_group_ids  = [aws_security_group.ssm_endpoints_sg.id]
   private_dns_enabled = true
 }
 
 resource "aws_vpc_endpoint" "ec2messages" {
-  vpc_id            = aws_vpc.main.id
-  service_name      = "com.amazonaws.${data.aws_region.current.name}.ec2messages"
-  vpc_endpoint_type = "Interface"
-  subnet_ids        = [aws_subnet.lab.id]
-  security_group_ids = [aws_security_group.ssm_endpoints_sg.id]
+  vpc_id              = aws_vpc.main.id
+  service_name        = "com.amazonaws.${data.aws_region.current.name}.ec2messages"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = [aws_subnet.lab.id]
+  security_group_ids  = [aws_security_group.ssm_endpoints_sg.id]
   private_dns_enabled = true
 }
 
@@ -340,6 +364,14 @@ resource "aws_security_group" "vault_sg" {
     cidr_blocks = [var.refinery_subnet_cidr]
   }
 
+  egress {
+    description     = "Allow outbound to S3 via Gateway Endpoint for yum/dnf updates"
+    from_port       = 443
+    to_port         = 443
+    protocol        = "tcp"
+    prefix_list_ids = [data.aws_prefix_list.s3.id]
+  }
+
   tags = { Name = "${var.project_name}-vault-sg" }
 }
 
@@ -370,6 +402,14 @@ resource "aws_security_group" "refinery_sg" {
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = [var.vpc_cidr]
+  }
+
+  egress {
+    description     = "Allow outbound to S3 via Gateway Endpoint for yum/dnf updates"
+    from_port       = 443
+    to_port         = 443
+    protocol        = "tcp"
+    prefix_list_ids = [data.aws_prefix_list.s3.id]
   }
 
   tags = { Name = "${var.project_name}-refinery-sg" }
@@ -403,6 +443,14 @@ resource "aws_security_group" "lab_sg" {
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = [var.refinery_subnet_cidr]
+  }
+
+  egress {
+    description     = "Allow outbound to S3 via Gateway Endpoint for yum/dnf updates"
+    from_port       = 443
+    to_port         = 443
+    protocol        = "tcp"
+    prefix_list_ids = [data.aws_prefix_list.s3.id]
   }
 
   tags = { Name = "${var.project_name}-lab-sg" }
